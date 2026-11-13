@@ -1,0 +1,14 @@
+--- a/CMakeLists.txt	2026-11-13 19:01:15.573091536 -0300
++++ b/CMakeLists.txt	2026-11-13 19:01:15.589141393 -0300
+@@ -8,6 +8,11 @@
+ 
+ # PIE for executables:
+ set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
++# Haiku links programs as shared objects, and the tools use data from the
++# shared libraries, so they need -fPIC rather than -fPIE.
++if(HAIKU)
++  set(CMAKE_C_COMPILE_OPTIONS_PIE ${CMAKE_C_COMPILE_OPTIONS_PIC})
++endif()
+ 
+ # helper macro to preserve original Makefile convention
+ macro(JXR_MAKE_OBJ SET_NAME)

@@ -1,0 +1,922 @@
+From: Mathieu Malaterre <malat@debian.org>
+Date: Wed, 17 Apr 2013 16:08:34 +0200
+Subject: Prefer a cmake based build system
+
+Forwarded: https://jxrlib.codeplex.com/discussions/440294
+---
+ CMakeLists.txt | 135 +++++++++++++++++++++++++++++++++++++++++++++++++++++++++
+ 1 file changed, 135 insertions(+)
+ create mode 100644 CMakeLists.txt
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+new file mode 100644
+index 0000000..abd5e72
+--- /dev/null
++++ b/CMakeLists.txt
+@@ -0,0 +1,135 @@
++# Copyright Mathieu Malaterre <malat@debian.org>
++# BSD (Same as jxrlib)
++cmake_minimum_required(VERSION 3.13)
++project(jxrlib C)
++
++# Need shared libs for ABI
++set(BUILD_SHARED_LIBS ON)
++
++# helper macro to preserve original Makefile convention
++macro(JXR_MAKE_OBJ SET_NAME)
++  foreach(src ${SRC_${SET_NAME}})
++    list(APPEND OBJ_${SET_NAME} ${DIR_${SET_NAME}}/${src})
++  endforeach()
++endmacro()
++
++include(TestBigEndian)
++test_big_endian(ISBIGENDIAN)
++if(ISBIGENDIAN)
++  set(DEF_ENDIAN _BIG__ENDIAN_)
++endif()
++
++set(DIR_SYS image/sys)
++set(DIR_DEC image/decode)
++set(DIR_ENC image/encode)
++
++set(DIR_GLUE jxrgluelib)
++set(DIR_TEST jxrtestlib)
++set(DIR_EXEC jxrencoderdecoder)
++
++if(NOT JXRLIB_INSTALL_BIN_DIR)
++  set(JXRLIB_INSTALL_BIN_DIR "bin")
++endif()
++
++if(NOT JXRLIB_INSTALL_LIB_DIR)
++  set(JXRLIB_INSTALL_LIB_DIR "lib")
++endif()
++
++if(NOT JXRLIB_INSTALL_INCLUDE_DIR)
++  set(JXRLIB_INSTALL_INCLUDE_DIR "include/jxrlib")
++endif()
++
++include_directories(
++  common/include
++  ${DIR_SYS}
++  ${DIR_GLUE}
++  ${DIR_TEST}
++)
++
++# where is strlcpy ?
++include(CheckSymbolExists)
++check_symbol_exists(strlcpy "string.h" HAVE_STRLCPY)
++#set(CMAKE_REQUIRED_LIBRARIES bsd)
++#CHECK_SYMBOL_EXISTS(strlcpy "string.h" HAVE_STRLCPY4)
++# on linux, strlcpy is in -lbsd:
++#if(NOT HAVE_STRLCPY)
++#  include(CheckLibraryExists)
++#  find_library(BSD_LIBRARY bsd)
++#  check_library_exists(bsd "strlcpy" ${BSD_LIBRARY} HAVE_STRLCPY_BSD)
++#endif()
++
++# JPEG-XR
++set(SRC_SYS adapthuff.c image.c strcodec.c strPredQuant.c strTransform.c perfTimerANSI.c)
++JXR_MAKE_OBJ(SYS)
++set(SRC_DEC decode.c postprocess.c segdec.c strdec.c strInvTransform.c strPredQuantDec.c JXRTranscode.c)
++JXR_MAKE_OBJ(DEC)
++set(SRC_ENC encode.c segenc.c strenc.c strFwdTransform.c strPredQuantEnc.c)
++JXR_MAKE_OBJ(ENC)
++
++add_library(jpegxr ${OBJ_ENC} ${OBJ_DEC} ${OBJ_SYS})
++set_property(TARGET jpegxr
++  PROPERTY COMPILE_DEFINITIONS __ANSI__ DISABLE_PERF_MEASUREMENT ${DEF_ENDIAN}
++)
++set_property(TARGET jpegxr PROPERTY LINK_INTERFACE_LIBRARIES "")
++set_property(TARGET jpegxr PROPERTY COMPILE_FLAGS -w)
++# VERSION/SOVERSION
++set_property(TARGET jpegxr PROPERTY VERSION 1.1)
++set_property(TARGET jpegxr PROPERTY SOVERSION 0)
++install(TARGETS jpegxr
++  EXPORT JXRLibTargets
++  RUNTIME DESTINATION ${JXRLIB_INSTALL_BIN_DIR} COMPONENT Applications
++  LIBRARY DESTINATION ${JXRLIB_INSTALL_LIB_DIR} COMPONENT Libraries
++)
++
++#Â JXR-GLUE
++set(SRC_GLUE JXRGlue.c JXRMeta.c JXRGluePFC.c JXRGlueJxr.c)
++JXR_MAKE_OBJ(GLUE)
++set(SRC_TEST JXRTest.c JXRTestBmp.c JXRTestHdr.c JXRTestPnm.c JXRTestTif.c JXRTestYUV.c)
++JXR_MAKE_OBJ(TEST)
++
++add_library(jxrglue ${OBJ_GLUE} ${OBJ_TEST})
++set_property(TARGET jxrglue
++  PROPERTY COMPILE_DEFINITIONS __ANSI__ DISABLE_PERF_MEASUREMENT ${DEF_ENDIAN}
++)
++#set_property(TARGET jxrglue PROPERTY LINK_INTERFACE_LIBRARIES "")
++set_property(TARGET jxrglue PROPERTY COMPILE_FLAGS -w)
++# VERSION/SOVERSION
++set_property(TARGET jxrglue PROPERTY VERSION 1.1)
++set_property(TARGET jxrglue PROPERTY SOVERSION 0)
++install(TARGETS jxrglue
++  EXPORT JXRLibTargets
++  RUNTIME DESTINATION ${JXRLIB_INSTALL_BIN_DIR} COMPONENT Applications
++  LIBRARY DESTINATION ${JXRLIB_INSTALL_LIB_DIR} COMPONENT Libraries
++)
++#if(HAVE_STRLCPY_BSD)
++#	target_link_libraries(jxrglue ${BSD_LIBRARY})
++#endif()
++#target_link_libraries(jxrglue m)
++target_link_libraries(jxrglue PRIVATE jpegxr m)
++# Enc app files
++set(ENCAPP JxrEncApp)
++add_executable(${ENCAPP} ${DIR_EXEC}/${ENCAPP}.c)
++set_property(TARGET ${ENCAPP}
++  PROPERTY COMPILE_DEFINITIONS __ANSI__ DISABLE_PERF_MEASUREMENT ${DEF_ENDIAN}
++)
++#set_property(TARGET ${ENCAPP} PROPERTY COMPILE_FLAGS -w)
++target_link_libraries(${ENCAPP} jxrglue) # jpegxr)
++install(TARGETS ${ENCAPP} RUNTIME DESTINATION ${JXRLIB_INSTALL_BIN_DIR})
++# Dec app files
++set(DECAPP JxrDecApp)
++add_executable(${DECAPP} ${DIR_EXEC}/${DECAPP}.c)
++set_property(TARGET ${DECAPP}
++  PROPERTY COMPILE_DEFINITIONS __ANSI__ DISABLE_PERF_MEASUREMENT ${DEF_ENDIAN}
++)
++set_property(TARGET ${DECAPP} PROPERTY COMPILE_FLAGS -w)
++target_link_libraries(${DECAPP} jxrglue) # jpegxr)
++install(TARGETS ${DECAPP} RUNTIME DESTINATION ${JXRLIB_INSTALL_BIN_DIR})
++
++# install rules
++install(FILES jxrgluelib/JXRGlue.h jxrgluelib/JXRMeta.h jxrtestlib/JXRTest.h
++  image/sys/windowsmediaphoto.h
++  DESTINATION ${JXRLIB_INSTALL_INCLUDE_DIR} COMPONENT Headers
++)
++install(DIRECTORY common/include/ DESTINATION ${JXRLIB_INSTALL_INCLUDE_DIR}
++  FILES_MATCHING PATTERN "*.h"
++)
+From: Mathieu Malaterre <malat@debian.org>
+Date: Fri, 6 Nov 2015 21:57:27 +0100
+Subject: Fix typos and remove some warnings
+
+---
+ jxrencoderdecoder/JxrEncApp.c | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/jxrencoderdecoder/JxrEncApp.c b/jxrencoderdecoder/JxrEncApp.c
+index aa9de53..63cbaf8 100644
+--- a/jxrencoderdecoder/JxrEncApp.c
++++ b/jxrencoderdecoder/JxrEncApp.c
+@@ -615,7 +615,7 @@ main(int argc, char* argv[])
+ 
+     //================================
+     Call(PKCreateCodecFactory(&pCodecFactory, WMP_SDK_VERSION));
+-    Call(pCodecFactory->CreateCodec(&IID_PKImageWmpEncode, &pEncoder));
++    Call(pCodecFactory->CreateCodec(&IID_PKImageWmpEncode, (void**)&pEncoder));
+ 
+     //----------------------------------------------------------------
+     Call(PKCreateTestFactory(&pTestFactory, WMP_SDK_VERSION));
+From: Mathieu Malaterre <malat@debian.org>
+Date: Fri, 26 Nov 2021 15:10:03 +0100
+Subject: Convert some national-encoding file to utf-8
+
+Forwarded: not-needed
+Last-Update: 2021-11-26
+
+W: libjxr-dev: national-encoding usr/include/jxrlib/wmsal.h
+Steps:
+% iconv -f CP1251 -t UTF-8 input.h -o input.h
+---
+ common/include/guiddef.h              | 6 +++---
+ common/include/wmsal.h                | 6 +++---
+ common/include/wmspecstring.h         | 6 +++---
+ common/include/wmspecstrings_adt.h    | 6 +++---
+ common/include/wmspecstrings_strict.h | 6 +++---
+ common/include/wmspecstrings_undef.h  | 6 +++---
+ image/sys/windowsmediaphoto.h         | 6 +++---
+ jxrgluelib/JXRMeta.h                  | 6 +++---
+ jxrtestlib/JXRTest.h                  | 6 +++---
+ 9 files changed, 27 insertions(+), 27 deletions(-)
+
+diff --git a/common/include/guiddef.h b/common/include/guiddef.h
+index 17e0ed3..c336f06 100644
+--- a/common/include/guiddef.h
++++ b/common/include/guiddef.h
+@@ -1,14 +1,14 @@
+ //+---------------------------------------------------------------------------
+ //
+-// Copyright © Microsoft Corp.
++// Copyright Â© Microsoft Corp.
+ // All rights reserved.
+ // 
+ // Redistribution and use in source and binary forms, with or without
+ // modification, are permitted provided that the following conditions are met:
+ // 
+-// • Redistributions of source code must retain the above copyright notice,
++// â€¢ Redistributions of source code must retain the above copyright notice,
+ //   this list of conditions and the following disclaimer.
+-// • Redistributions in binary form must reproduce the above copyright notice,
++// â€¢ Redistributions in binary form must reproduce the above copyright notice,
+ //   this list of conditions and the following disclaimer in the documentation
+ //   and/or other materials provided with the distribution.
+ // 
+diff --git a/common/include/wmsal.h b/common/include/wmsal.h
+index 736ef83..44d00ec 100644
+--- a/common/include/wmsal.h
++++ b/common/include/wmsal.h
+@@ -1,15 +1,15 @@
+ /***
+ *sal.h - markers for documenting the semantics of APIs
+ *
+-* Copyright © Microsoft Corp.
++* Copyright Â© Microsoft Corp.
+ * All rights reserved.
+ * 
+ * Redistribution and use in source and binary forms, with or without
+ * modification, are permitted provided that the following conditions are met:
+ * 
+-* • Redistributions of source code must retain the above copyright notice,
++* â€¢ Redistributions of source code must retain the above copyright notice,
+ *   this list of conditions and the following disclaimer.
+-* • Redistributions in binary form must reproduce the above copyright notice,
++* â€¢ Redistributions in binary form must reproduce the above copyright notice,
+ *   this list of conditions and the following disclaimer in the documentation
+ *   and/or other materials provided with the distribution.
+ * 
+diff --git a/common/include/wmspecstring.h b/common/include/wmspecstring.h
+index 1b4767e..7cc2f13 100644
+--- a/common/include/wmspecstring.h
++++ b/common/include/wmspecstring.h
+@@ -1,14 +1,14 @@
+ //*@@@+++@@@@******************************************************************
+ //
+-// Copyright © Microsoft Corp.
++// Copyright Â© Microsoft Corp.
+ // All rights reserved.
+ // 
+ // Redistribution and use in source and binary forms, with or without
+ // modification, are permitted provided that the following conditions are met:
+ // 
+-// • Redistributions of source code must retain the above copyright notice,
++// â€¢ Redistributions of source code must retain the above copyright notice,
+ //   this list of conditions and the following disclaimer.
+-// • Redistributions in binary form must reproduce the above copyright notice,
++// â€¢ Redistributions in binary form must reproduce the above copyright notice,
+ //   this list of conditions and the following disclaimer in the documentation
+ //   and/or other materials provided with the distribution.
+ // 
+diff --git a/common/include/wmspecstrings_adt.h b/common/include/wmspecstrings_adt.h
+index ca7f25f..1c7b814 100644
+--- a/common/include/wmspecstrings_adt.h
++++ b/common/include/wmspecstrings_adt.h
+@@ -1,14 +1,14 @@
+ //*@@@+++@@@@******************************************************************
+ //
+-// Copyright © Microsoft Corp.
++// Copyright Â© Microsoft Corp.
+ // All rights reserved.
+ // 
+ // Redistribution and use in source and binary forms, with or without
+ // modification, are permitted provided that the following conditions are met:
+ // 
+-// • Redistributions of source code must retain the above copyright notice,
++// â€¢ Redistributions of source code must retain the above copyright notice,
+ //   this list of conditions and the following disclaimer.
+-// • Redistributions in binary form must reproduce the above copyright notice,
++// â€¢ Redistributions in binary form must reproduce the above copyright notice,
+ //   this list of conditions and the following disclaimer in the documentation
+ //   and/or other materials provided with the distribution.
+ // 
+diff --git a/common/include/wmspecstrings_strict.h b/common/include/wmspecstrings_strict.h
+index 46b44c2..93b876c 100644
+--- a/common/include/wmspecstrings_strict.h
++++ b/common/include/wmspecstrings_strict.h
+@@ -1,14 +1,14 @@
+ //*@@@+++@@@@******************************************************************
+ //
+-// Copyright © Microsoft Corp.
++// Copyright Â© Microsoft Corp.
+ // All rights reserved.
+ // 
+ // Redistribution and use in source and binary forms, with or without
+ // modification, are permitted provided that the following conditions are met:
+ // 
+-// • Redistributions of source code must retain the above copyright notice,
++// â€¢ Redistributions of source code must retain the above copyright notice,
+ //   this list of conditions and the following disclaimer.
+-// • Redistributions in binary form must reproduce the above copyright notice,
++// â€¢ Redistributions in binary form must reproduce the above copyright notice,
+ //   this list of conditions and the following disclaimer in the documentation
+ //   and/or other materials provided with the distribution.
+ // 
+diff --git a/common/include/wmspecstrings_undef.h b/common/include/wmspecstrings_undef.h
+index 86e6159..ed53c31 100644
+--- a/common/include/wmspecstrings_undef.h
++++ b/common/include/wmspecstrings_undef.h
+@@ -1,14 +1,14 @@
+ //*@@@+++@@@@******************************************************************
+ //
+-// Copyright © Microsoft Corp.
++// Copyright Â© Microsoft Corp.
+ // All rights reserved.
+ // 
+ // Redistribution and use in source and binary forms, with or without
+ // modification, are permitted provided that the following conditions are met:
+ // 
+-// • Redistributions of source code must retain the above copyright notice,
++// â€¢ Redistributions of source code must retain the above copyright notice,
+ //   this list of conditions and the following disclaimer.
+-// • Redistributions in binary form must reproduce the above copyright notice,
++// â€¢ Redistributions in binary form must reproduce the above copyright notice,
+ //   this list of conditions and the following disclaimer in the documentation
+ //   and/or other materials provided with the distribution.
+ // 
+diff --git a/image/sys/windowsmediaphoto.h b/image/sys/windowsmediaphoto.h
+index fad7ad7..fb9768b 100644
+--- a/image/sys/windowsmediaphoto.h
++++ b/image/sys/windowsmediaphoto.h
+@@ -1,14 +1,14 @@
+ //*@@@+++@@@@******************************************************************
+ //
+-// Copyright © Microsoft Corp.
++// Copyright Â© Microsoft Corp.
+ // All rights reserved.
+ // 
+ // Redistribution and use in source and binary forms, with or without
+ // modification, are permitted provided that the following conditions are met:
+ // 
+-// • Redistributions of source code must retain the above copyright notice,
++// â€¢ Redistributions of source code must retain the above copyright notice,
+ //   this list of conditions and the following disclaimer.
+-// • Redistributions in binary form must reproduce the above copyright notice,
++// â€¢ Redistributions in binary form must reproduce the above copyright notice,
+ //   this list of conditions and the following disclaimer in the documentation
+ //   and/or other materials provided with the distribution.
+ // 
+diff --git a/jxrgluelib/JXRMeta.h b/jxrgluelib/JXRMeta.h
+index b7b5880..5321504 100644
+--- a/jxrgluelib/JXRMeta.h
++++ b/jxrgluelib/JXRMeta.h
+@@ -1,14 +1,14 @@
+ //*@@@+++@@@@******************************************************************
+ //
+-// Copyright © Microsoft Corp.
++// Copyright Â© Microsoft Corp.
+ // All rights reserved.
+ // 
+ // Redistribution and use in source and binary forms, with or without
+ // modification, are permitted provided that the following conditions are met:
+ // 
+-// • Redistributions of source code must retain the above copyright notice,
++// â€¢ Redistributions of source code must retain the above copyright notice,
+ //   this list of conditions and the following disclaimer.
+-// • Redistributions in binary form must reproduce the above copyright notice,
++// â€¢ Redistributions in binary form must reproduce the above copyright notice,
+ //   this list of conditions and the following disclaimer in the documentation
+ //   and/or other materials provided with the distribution.
+ // 
+diff --git a/jxrtestlib/JXRTest.h b/jxrtestlib/JXRTest.h
+index 104c728..a001a78 100644
+--- a/jxrtestlib/JXRTest.h
++++ b/jxrtestlib/JXRTest.h
+@@ -1,14 +1,14 @@
+ //*@@@+++@@@@******************************************************************
+ //
+-// Copyright © Microsoft Corp.
++// Copyright Â© Microsoft Corp.
+ // All rights reserved.
+ // 
+ // Redistribution and use in source and binary forms, with or without
+ // modification, are permitted provided that the following conditions are met:
+ // 
+-// • Redistributions of source code must retain the above copyright notice,
++// â€¢ Redistributions of source code must retain the above copyright notice,
+ //   this list of conditions and the following disclaimer.
+-// • Redistributions in binary form must reproduce the above copyright notice,
++// â€¢ Redistributions in binary form must reproduce the above copyright notice,
+ //   this list of conditions and the following disclaimer in the documentation
+ //   and/or other materials provided with the distribution.
+ // 
+From: Mathieu Malaterre <malat@debian.org>
+Date: Fri, 26 Nov 2021 16:23:52 +0100
+Subject: Document PNM output
+
+Bug-Debian: https://bugs.debian.org/771912
+Forwarded: https://github.com/4creators/jxrlib/pull/4
+Last-Update: 2021-11-26
+---
+ jxrencoderdecoder/JxrDecApp.c | 3 ++-
+ jxrencoderdecoder/JxrEncApp.c | 3 ++-
+ 2 files changed, 4 insertions(+), 2 deletions(-)
+
+diff --git a/jxrencoderdecoder/JxrDecApp.c b/jxrencoderdecoder/JxrDecApp.c
+index 35fa10c..5779eb8 100644
+--- a/jxrencoderdecoder/JxrDecApp.c
++++ b/jxrencoderdecoder/JxrDecApp.c
+@@ -82,8 +82,9 @@ void WmpDecAppUsage(const char* szExe)
+     printf(CRLF);
+     printf("  -i input.jxr/wdp             Input JPEG XR/HD Photo file name" CRLF);
+     printf(CRLF);
+-    printf("  -o output.bmp/tif/jxr        Output image file name" CRLF);
++    printf("  -o output.bmp/pnm/tif/jxr    Output image file name" CRLF);
+     printf("                               bmp: <=8bpc, BGR" CRLF);
++    printf("                               pnm: >=8bpc, RGB" CRLF);
+     printf("                               tif: >=8bpc, RGB" CRLF);
+     printf("                               jxr: for compressed domain transcode" CRLF);
+     printf(CRLF);
+diff --git a/jxrencoderdecoder/JxrEncApp.c b/jxrencoderdecoder/JxrEncApp.c
+index 63cbaf8..b46c6c5 100644
+--- a/jxrencoderdecoder/JxrEncApp.c
++++ b/jxrencoderdecoder/JxrEncApp.c
+@@ -55,8 +55,9 @@ void WmpEncAppUsage(const char* szExe)
+     printf(CRLF);
+     printf("%s [options]..." CRLF, szExe);
+     printf(CRLF);
+-    printf("  -i input.bmp/tif/hdr         Input image file name" CRLF);
++    printf("  -i input.bmp/pnm/tif/hdr     Input image file name" CRLF);
+     printf("                               bmp: <=8bpc, BGR" CRLF);
++    printf("                               pnm: >=8bpc, RGB" CRLF);
+     printf("                               tif: >=8bpc, RGB" CRLF);
+     printf("                               hdr: 32bppRGBE only" CRLF);
+     printf(CRLF);
+From: Mathieu Malaterre <malat@debian.org>
+Date: Fri, 26 Nov 2021 16:45:51 +0100
+Subject: libjxr-dev: Missing pkgconfig file
+
+Bug-Debian: https://bugs.debian.org/803743
+Forwarded: no
+Last-Update: 2021-11-26
+---
+ CMakeLists.txt | 15 +++++++++++++--
+ libjxr.pc.in   |  6 +++---
+ 2 files changed, 16 insertions(+), 5 deletions(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index abd5e72..70d8bad 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -17,6 +17,7 @@ include(TestBigEndian)
+ test_big_endian(ISBIGENDIAN)
+ if(ISBIGENDIAN)
+   set(DEF_ENDIAN _BIG__ENDIAN_)
++  set(JXR_ENDIAN "-D${DEF_ENDIAN}")
+ endif()
+ 
+ set(DIR_SYS image/sys)
+@@ -73,7 +74,8 @@ set_property(TARGET jpegxr
+ set_property(TARGET jpegxr PROPERTY LINK_INTERFACE_LIBRARIES "")
+ set_property(TARGET jpegxr PROPERTY COMPILE_FLAGS -w)
+ # VERSION/SOVERSION
+-set_property(TARGET jpegxr PROPERTY VERSION 1.1)
++set(JXR_VERSION "1.1")
++set_property(TARGET jpegxr PROPERTY VERSION ${JXR_VERSION})
+ set_property(TARGET jpegxr PROPERTY SOVERSION 0)
+ install(TARGETS jpegxr
+   EXPORT JXRLibTargets
+@@ -94,7 +96,7 @@ set_property(TARGET jxrglue
+ #set_property(TARGET jxrglue PROPERTY LINK_INTERFACE_LIBRARIES "")
+ set_property(TARGET jxrglue PROPERTY COMPILE_FLAGS -w)
+ # VERSION/SOVERSION
+-set_property(TARGET jxrglue PROPERTY VERSION 1.1)
++set_property(TARGET jxrglue PROPERTY VERSION ${JXR_VERSION})
+ set_property(TARGET jxrglue PROPERTY SOVERSION 0)
+ install(TARGETS jxrglue
+   EXPORT JXRLibTargets
+@@ -133,3 +135,12 @@ install(FILES jxrgluelib/JXRGlue.h jxrgluelib/JXRMeta.h jxrtestlib/JXRTest.h
+ install(DIRECTORY common/include/ DESTINATION ${JXRLIB_INSTALL_INCLUDE_DIR}
+   FILES_MATCHING PATTERN "*.h"
+ )
++
++set(DIR_INSTALL ${CMAKE_INSTALL_PREFIX})
++configure_file(${CMAKE_CURRENT_SOURCE_DIR}/libjxr.pc.in
++ ${CMAKE_CURRENT_BINARY_DIR}/libjxr.pc
++ @ONLY
++)
++install(FILES ${CMAKE_CURRENT_BINARY_DIR}/libjxr.pc
++  DESTINATION ${JXRLIB_INSTALL_LIB_DIR}/pkgconfig COMPONENT Header
++)
+diff --git a/libjxr.pc.in b/libjxr.pc.in
+index b581451..82c2fd5 100644
+--- a/libjxr.pc.in
++++ b/libjxr.pc.in
+@@ -1,4 +1,4 @@
+-prefix=%(DIR_INSTALL)s
++prefix=@DIR_INSTALL@
+ exec_prefix=${prefix}
+ libdir=${exec_prefix}/lib
+ includedir=${prefix}/include
+@@ -6,7 +6,7 @@ includedir=${prefix}/include
+ Name: libjxr
+ Description: A library for reading JPEG XR images.
+ 
+-Version: %(JXR_VERSION)s
++Version: @JXR_VERSION@
+ Libs: -L${libdir} -ljpegxr -ljxrglue
+ Libs.private: -lm 
+-Cflags: -I${includedir}/libjxr/common -I${includedir}/libjxr/image/x86 -I${includedir}/libjxr/image -I${includedir}/libjxr/glue -I${includedir}/libjxr/test -D__ANSI__ -DDISABLE_PERF_MEASUREMENT %(JXR_ENDIAN)s
++Cflags: -I${includedir}/libjxr/common -I${includedir}/libjxr/image/x86 -I${includedir}/libjxr/image -I${includedir}/libjxr/glue -I${includedir}/libjxr/test -D__ANSI__ -DDISABLE_PERF_MEASUREMENT @JXR_ENDIAN@
+From: Mathieu Malaterre <malat@debian.org>
+Date: Fri, 26 Nov 2021 17:15:11 +0100
+Subject: Version is 1.2
+
+Forwarded: not-needed
+Last-Update: 2021-11-26
+---
+ CMakeLists.txt | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 70d8bad..53203e2 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -74,7 +74,7 @@ set_property(TARGET jpegxr
+ set_property(TARGET jpegxr PROPERTY LINK_INTERFACE_LIBRARIES "")
+ set_property(TARGET jpegxr PROPERTY COMPILE_FLAGS -w)
+ # VERSION/SOVERSION
+-set(JXR_VERSION "1.1")
++set(JXR_VERSION "1.2")
+ set_property(TARGET jpegxr PROPERTY VERSION ${JXR_VERSION})
+ set_property(TARGET jpegxr PROPERTY SOVERSION 0)
+ install(TARGETS jpegxr
+From: Yann Leprince <yann.leprince@cea.fr>
+Date: Fri, 28 Jan 2022 10:47:02 +0100
+Subject: Incorrect path to include directory in pkg-config (libjxr.pc)
+
+Reviewed-By: Mathieu Malaterre <malat@debian.org>
+Forwarded: no
+Last-Update: 2022-01-28
+
+The pkg-config file for libjxr contains incorrect paths to the headers: it
+refers to paths used by the upstream Makefile (sub-directories of
+/usr/include/libjxr) whereas the Debian package actually installs the headers
+directly into a different directory (/usr/include/jxrlib). Therefore,
+packages that depend on jxrlib via the pkg-config file fail to build.
+
+Original patch did not apply cleanly, rework it (malat)
+---
+ libjxr.pc.in | 2 +-
+ 1 file changed, 1 insertion(+), 1 deletion(-)
+
+diff --git a/libjxr.pc.in b/libjxr.pc.in
+index 82c2fd5..1589204 100644
+--- a/libjxr.pc.in
++++ b/libjxr.pc.in
+@@ -9,4 +9,4 @@ Description: A library for reading JPEG XR images.
+ Version: @JXR_VERSION@
+ Libs: -L${libdir} -ljpegxr -ljxrglue
+ Libs.private: -lm 
+-Cflags: -I${includedir}/libjxr/common -I${includedir}/libjxr/image/x86 -I${includedir}/libjxr/image -I${includedir}/libjxr/glue -I${includedir}/libjxr/test -D__ANSI__ -DDISABLE_PERF_MEASUREMENT @JXR_ENDIAN@
++Cflags: -I${includedir}/jxrlib -D__ANSI__ -DDISABLE_PERF_MEASUREMENT @JXR_ENDIAN@
+From: Mathieu Malaterre <malat@debian.org>
+Date: Fri, 28 Jan 2022 12:00:32 +0100
+Subject: lintian hardening-no-bindnow
+
+Forwarded: not-needed
+Last-Update: 2022-01-28
+---
+ CMakeLists.txt | 3 +++
+ 1 file changed, 3 insertions(+)
+
+diff --git a/CMakeLists.txt b/CMakeLists.txt
+index 53203e2..bf564de 100644
+--- a/CMakeLists.txt
++++ b/CMakeLists.txt
+@@ -6,6 +6,9 @@ project(jxrlib C)
+ # Need shared libs for ABI
+ set(BUILD_SHARED_LIBS ON)
+ 
++# PIE for executables:
++set(CMAKE_POSITION_INDEPENDENT_CODE TRUE)
++
+ # helper macro to preserve original Makefile convention
+ macro(JXR_MAKE_OBJ SET_NAME)
+   foreach(src ${SRC_${SET_NAME}})
+From: Milian Wolff <milian.wolff@kdab.com>
+Date: Mon, 7 Jun 2021 09:45:26 +0200
+Subject: Use mkstemp instead of tmpnam
+
+tmpnam isn't threadsafe and shouldn't be used. Fixes compiler warning:
+```
+warning: the use of 'tmpnam' is dangerous, better use 'mkstemp'
+```
+---
+ image/encode/strenc.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/image/encode/strenc.c b/image/encode/strenc.c
+index d6e970e..65c277e 100644
+--- a/image/encode/strenc.c
++++ b/image/encode/strenc.c
+@@ -482,8 +482,10 @@ Int StrIOEncInit(CWMImageStrCodec* pSC)
+                 pSC->ppTempFile[i] = (char *)malloc(FILENAME_MAX * sizeof(char));
+                 if(pSC->ppTempFile[i] == NULL) return ICERR_ERROR;
+ 
+-                if ((pFilename = tmpnam(NULL)) == NULL)
++                char tmpnambuf[] = {'f', 'i', 'l', 'e', 'X', 'X', 'X', 'X', 'X', 'X', '\0'};
++                if (mkstemp(tmpnambuf) == -1)
+                     return ICERR_ERROR;                
++                pFilename = tmpnambuf;
+                 strcpy(pSC->ppTempFile[i], pFilename);
+ #endif
+                 if(CreateWS_File(pSC->ppWStream + i, pFilename, "w+b") != ICERR_OK) return ICERR_ERROR;                
+From: Milian Wolff <milian.wolff@kdab.com>
+Date: Mon, 7 Jun 2021 10:30:46 +0200
+Subject: Fix memory leaks when handling OOM scenario
+
+If the second or third allocation failed, the code would leak
+the first and/or secon allocation. Free all buffers if we return
+early to prevent this.
+---
+ jxrtestlib/JXRTestYUV.c | 18 ++++++++++++++++++
+ 1 file changed, 18 insertions(+)
+
+diff --git a/jxrtestlib/JXRTestYUV.c b/jxrtestlib/JXRTestYUV.c
+index 52dc4ca..b803387 100644
+--- a/jxrtestlib/JXRTestYUV.c
++++ b/jxrtestlib/JXRTestYUV.c
+@@ -120,6 +120,9 @@ ERR PKImageEncode_WritePixels_IYUV(
+ 
+     if(pY == NULL || pU == NULL || pV == NULL)
+     {
++        free(pY);
++        free(pU);
++        free(pV);
+         return ICERR_ERROR;
+     }
+ 
+@@ -198,6 +201,9 @@ ERR PKImageEncode_WritePixels_YUV422(
+ 
+     if(pY == NULL || pU == NULL || pV == NULL)
+     {
++        free(pY);
++        free(pU);
++        free(pV);
+         return ICERR_ERROR;
+     }
+ //YYUV
+@@ -273,6 +279,9 @@ ERR PKImageEncode_WritePixels_YUV444(
+ 
+     if(pY == NULL || pU == NULL || pV == NULL)
+     {
++        free(pY);
++        free(pU);
++        free(pV);
+         return ICERR_ERROR;
+     }
+ 
+@@ -491,6 +500,9 @@ ERR PKImageDecode_Copy_IYUV(
+ 
+     if(pY == NULL || pU == NULL || pV == NULL)
+     {
++        free(pY);
++        free(pU);
++        free(pV);
+         return ICERR_ERROR;
+     }
+ 
+@@ -564,6 +576,9 @@ ERR PKImageDecode_Copy_YUV422(
+ 
+     if(pY == NULL || pU == NULL || pV == NULL)
+     {
++        free(pY);
++        free(pU);
++        free(pV);
+         return ICERR_ERROR;
+     }
+ 
+@@ -635,6 +650,9 @@ ERR PKImageDecode_Copy_YUV444(
+ 
+     if(pY == NULL || pU == NULL || pV == NULL)
+     {
++        free(pY);
++        free(pU);
++        free(pV);
+         return ICERR_ERROR;
+     }
+ 
+From: Milian Wolff <milian.wolff@kdab.com>
+Date: Mon, 7 Jun 2021 10:00:09 +0200
+Subject: fix undefined behavior for left-shift of -1
+
+My hunch is that (-1 << 31) tries to build INT_MIN, so use that
+directly. Compare:
+
+1 << 31 = 2147483648
+INT_MIN = -2147483648
+---
+ image/sys/adapthuff.c | 4 +++-
+ 1 file changed, 3 insertions(+), 1 deletion(-)
+
+diff --git a/image/sys/adapthuff.c b/image/sys/adapthuff.c
+index a690889..cd83034 100644
+--- a/image/sys/adapthuff.c
++++ b/image/sys/adapthuff.c
+@@ -28,6 +28,8 @@
+ 
+ #include "strcodec.h"
+ 
++#include <limits.h>
++
+ #ifdef MEM_TRACE
+ #define TRACE_MALLOC    1
+ #define TRACE_NEW       0
+@@ -459,7 +461,7 @@ Void AdaptDiscriminant (CAdaptiveHuffman *pAdHuff)
+     assert (t < gMaxTables[iSym]);
+ 
+     //pAdHuff->m_iDiscriminant >>= 1;
+-    pAdHuff->m_iLowerBound = (t == 0) ? (-1 << 31) : -THRESHOLD;
++    pAdHuff->m_iLowerBound = (t == 0) ? INT_MIN : -THRESHOLD;
+     pAdHuff->m_iUpperBound = (t == gMaxTables[iSym] - 1) ? (1 << 30) : THRESHOLD;
+ 
+     switch (iSym) {
+From: Milian Wolff <milian.wolff@kdab.com>
+Date: Mon, 7 Jun 2021 09:56:37 +0200
+Subject: fix warnings about unaligned loads from UBSAN
+
+Use memcpy instead to ensure that we don't get warnings about
+unaligned loads from UBSAN:
+
+```
+../3rdParty/jxrlib/image/decode/segdec.c:66:12: runtime error: load of misaligned address 0x7fc3a0544006 for type 'U32', which requires 4 byte alignment
+0x7fc3a0544006: note: pointer points here
+ 01 01 a5 c0 b0 7c  0a 06 05 00 0c 14 10 c2  c0 30 80 38 72 41 ae 1a  8f 54 26 c2 9e f6 c1 25  a9 65
+             ^
+    #0 0x7fc3e137429a in _load4 ../3rdParty/jxrlib/image/decode/segdec.c:66
+    #1 0x7fc3e13748b8 in _flushBit16 ../3rdParty/jxrlib/image/decode/segdec.c:80
+    #2 0x7fc3e13749a6 in _getBit16 ../3rdParty/jxrlib/image/decode/segdec.c:86
+    #3 0x7fc3e1385d75 in DecodeMacroblockDC ../3rdParty/jxrlib/image/decode/segdec.c:1224
+    #4 0x7fc3e131924a in processMacroblockDec ../3rdParty/jxrlib/image/decode/strdec.c:412
+    #5 0x7fc3e137207a in ImageStrDecDecode ../3rdParty/jxrlib/image/decode/strdec.c:4003
+    #6 0x7fc3e126c0b2 in PKImageDecode_Copy_WMP ../3rdParty/jxrlib/jxrgluelib/JXRGlueJxr.c:1874
+```
+---
+ image/decode/segdec.c | 4 +++-
+ image/sys/strcodec.c  | 4 +++-
+ 2 files changed, 6 insertions(+), 2 deletions(-)
+
+diff --git a/image/decode/segdec.c b/image/decode/segdec.c
+index fb83f2b..3c890af 100644
+--- a/image/decode/segdec.c
++++ b/image/decode/segdec.c
+@@ -63,7 +63,9 @@ static U32 _FORCEINLINE _load4(void* pv)
+     v |= ((U32)((U16 *) pv)[1]) << 16;
+     return _byteswap_ulong(v);
+ #else // _M_IA64
+-    return _byteswap_ulong(*(U32*)pv);
++    U32 v;
++    memcpy(&v, pv, sizeof(U32));
++    return _byteswap_ulong(v);
+ #endif // _M_IA64
+ #endif // _BIG__ENDIAN_
+ }
+diff --git a/image/sys/strcodec.c b/image/sys/strcodec.c
+index c746d6f..b0989dd 100644
+--- a/image/sys/strcodec.c
++++ b/image/sys/strcodec.c
+@@ -694,7 +694,9 @@ U32 load4BE(void* pv)
+     v |= ((U32)((U16 *) pv)[1]) << 16;
+     return _byteswap_ulong(v);
+ #else // _M_IA64
+-    return _byteswap_ulong(*(U32*)pv);
++    U32 v;
++    memcpy(&v, pv, sizeof(U32));
++    return _byteswap_ulong(v);
+ #endif // _M_IA64
+ #endif // _BIG__ENDIAN_
+ }
+From: YOKOTA Hiroshi <yokota.hgml@gmail.com>
+Date: Thu, 25 Jul 2024 15:03:31 +0900
+Subject: jxrlib: ftbfs with GCC-14
+MIME-Version: 1.0
+Content-Type: text/plain; charset="utf-8"
+Content-Transfer-Encoding: 8bit
+
+Bug-Debian: https://bugs.debian.org/1075105
+
+_byteswap_ulong() is defined in image/sys/strcodec.c
+
+----
+/usr/bin/cc -DDISABLE_PERF_MEASUREMENT -D__ANSI__ -Djpegxr_EXPORTS -I"/<<PKGBUILDDIR>>/common/include" -I"/<<PKGBUILDDIR>>/image/sys" -I"/<<PKGBUILDDIR>>/jxrgluelib" -I"/<<PKGBUILDDIR>>/jxrtestlib" -g -O2 -Werror=implicit-function-declaration -ffile-prefix-map=/<<PKGBUILDDIR>>=. -fstack-protector-strong -fstack-clash-protection -Wformat -Werror=format-security -fcf-protection -Wall -Wextra -Wdate-time -D_FORTIFY_SOURCE=2 -fPIC -w -MD -MT CMakeFiles/jpegxr.dir/image/encode/strenc.c.o -MF CMakeFiles/jpegxr.dir/image/encode/strenc.c.o.d -o CMakeFiles/jpegxr.dir/image/encode/strenc.c.o -c "/<<PKGBUILDDIR>>/image/encode/strenc.c"
+/<<PKGBUILDDIR>>/image/decode/segdec.c: In function â€˜_load4â€™:
+/<<PKGBUILDDIR>>/image/decode/segdec.c:68:12: error: implicit declaration of function â€˜_byteswap_ulongâ€™ [-Wimplicit-function-declaration]
+   68 |     return _byteswap_ulong(v);
+      |            ^~~~~~~~~~~~~~~
+---
+ image/decode/segdec.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/image/decode/segdec.c b/image/decode/segdec.c
+index 3c890af..5d55f06 100644
+--- a/image/decode/segdec.c
++++ b/image/decode/segdec.c
+@@ -63,6 +63,7 @@ static U32 _FORCEINLINE _load4(void* pv)
+     v |= ((U32)((U16 *) pv)[1]) << 16;
+     return _byteswap_ulong(v);
+ #else // _M_IA64
++    U32 _byteswap_ulong(U32 bits); // from image/sys/strcodec.c
+     U32 v;
+     memcpy(&v, pv, sizeof(U32));
+     return _byteswap_ulong(v);
+From: YOKOTA Hiroshi <yokota.hgml@gmail.com>
+Date: Thu, 25 Jul 2024 16:00:12 +0900
+Subject: FTBFS fix for pointer type mismatch
+
+Bug-Debian: https://bugs.debian.org/1075105
+---
+ jxrencoderdecoder/JxrDecApp.c |  2 +-
+ jxrtestlib/JXRTest.c          | 10 +++++-----
+ jxrtestlib/JXRTestTif.c       |  4 ++--
+ 3 files changed, 8 insertions(+), 8 deletions(-)
+
+diff --git a/jxrencoderdecoder/JxrDecApp.c b/jxrencoderdecoder/JxrDecApp.c
+index 5779eb8..f07b3c4 100644
+--- a/jxrencoderdecoder/JxrDecApp.c
++++ b/jxrencoderdecoder/JxrDecApp.c
+@@ -428,7 +428,7 @@ ERR WmpDecAppCreateEncoderFromExt(
+     Call(GetTestEncodeIID(szExt, &pIID));
+ 
+     // Create encoder
+-    Call(PKTestFactory_CreateCodec(pIID, ppIE));
++    Call(PKTestFactory_CreateCodec(pIID, (void **)ppIE));
+ 
+ Cleanup:
+     return err;
+diff --git a/jxrtestlib/JXRTest.c b/jxrtestlib/JXRTest.c
+index b2a9b64..790b0de 100644
+--- a/jxrtestlib/JXRTest.c
++++ b/jxrtestlib/JXRTest.c
+@@ -198,7 +198,7 @@ ERR PKTestFactory_CreateDecoderFromFile(const char* szFilename, PKImageDecode**
+     ERR err = WMP_errSuccess;
+ 
+     char *pExt = NULL;
+-    PKIID* pIID = NULL;
++    const PKIID* pIID = NULL;
+ 
+     struct WMPStream* pStream = NULL;
+     PKImageDecode* pDecoder = NULL;
+@@ -214,7 +214,7 @@ ERR PKTestFactory_CreateDecoderFromFile(const char* szFilename, PKImageDecode**
+     Call(CreateWS_File(&pStream, szFilename, "rb"));
+ 
+     // Create decoder
+-    Call(PKTestFactory_CreateCodec(pIID, ppDecoder));
++    Call(PKTestFactory_CreateCodec(pIID, (void **)ppDecoder));
+     pDecoder = *ppDecoder;
+ 
+     // attach stream to decoder
+@@ -232,7 +232,7 @@ ERR PKCreateTestFactory(PKCodecFactory** ppCFactory, U32 uVersion)
+ 
+     UNREFERENCED_PARAMETER( uVersion );
+ 
+-    Call(PKAlloc(ppCFactory, sizeof(**ppCFactory)));
++    Call(PKAlloc((void **)ppCFactory, sizeof(**ppCFactory)));
+     pCFactory = *ppCFactory;
+ 
+     pCFactory->CreateCodec = PKTestFactory_CreateCodec;
+@@ -287,7 +287,7 @@ ERR PKTestDecode_Release(
+ 
+     pID->fStreamOwner && pID->pStream->Close(&pID->pStream);
+ 
+-    return PKFree(ppID);
++    return PKFree((void **)ppID);
+ }
+ 
+ ERR PKTestDecode_Create(
+@@ -296,7 +296,7 @@ ERR PKTestDecode_Create(
+     ERR err = WMP_errSuccess;
+     PKTestDecode* pID = NULL;
+ 
+-    Call(PKAlloc(ppID, sizeof(**ppID)));
++    Call(PKAlloc((void **)ppID, sizeof(**ppID)));
+ 
+     pID = *ppID;
+     pID->Initialize = PKTestDecode_Initialize;
+diff --git a/jxrtestlib/JXRTestTif.c b/jxrtestlib/JXRTestTif.c
+index 39f619d..bbe5626 100644
+--- a/jxrtestlib/JXRTestTif.c
++++ b/jxrtestlib/JXRTestTif.c
+@@ -909,8 +909,8 @@ ERR PKImageDecode_Release_TIF(PKTestDecode** ppID)
+ 
+     PKTestDecode *pID = *ppID;
+ 
+-    Call(WMPFree(&pID->EXT.TIF.uStripOffsets));
+-    Call(WMPFree(&pID->EXT.TIF.uStripByteCounts));
++    Call(WMPFree((void **)(&pID->EXT.TIF.uStripOffsets)));
++    Call(WMPFree((void **)(&pID->EXT.TIF.uStripByteCounts)));
+ 
+     Call(PKTestDecode_Release(ppID));
+ 
+From: YOKOTA Hiroshi <yokota.hgml@gmail.com>
+Date: Thu, 25 Jul 2024 16:01:01 +0900
+Subject: FTBFS fix for function prototype error
+
+Bug-Debian: https://bugs.debian.org/1075105
+---
+ jxrgluelib/JXRGlueJxr.c | 1 +
+ 1 file changed, 1 insertion(+)
+
+diff --git a/jxrgluelib/JXRGlueJxr.c b/jxrgluelib/JXRGlueJxr.c
+index 1745acf..741bd97 100644
+--- a/jxrgluelib/JXRGlueJxr.c
++++ b/jxrgluelib/JXRGlueJxr.c
+@@ -28,6 +28,7 @@
+ //*@@@---@@@@******************************************************************
+ #include <limits.h>
+ #include <JXRGlue.h>
++#include <wchar.h>
+ 
+ 
+ static const char szHDPhotoFormat[] = "<dc:format>image/vnd.ms-photo</dc:format>";

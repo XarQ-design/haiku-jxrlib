@@ -1,0 +1,84 @@
+SUMMARY="Reference library for JPEG XR (HD Photo) images"
+DESCRIPTION="jxrlib is Microsoft's open source reference implementation of \
+JPEG XR, the image format also known as HD Photo or Windows Media Photo \
+(.jxr, .wdp, .hdp). It encodes and decodes the format, including high \
+dynamic range and wide gamut images.
+
+This build is the 4creators snapshot with Debian's patches, which add a \
+CMake build, shared libraries and a pkg-config file."
+HOMEPAGE="https://github.com/4creators/jxrlib"
+COPYRIGHT="2009-2013 Microsoft Corporation"
+LICENSE="BSD (2-clause)"
+REVISION="1"
+srcGitRev="1ef17dd8b7b6e958241914c8911d942a43837233"
+SOURCE_URI="https://github.com/4creators/jxrlib/archive/$srcGitRev.tar.gz"
+CHECKSUM_SHA256="92f57ad64dd44efc558017384240baadaadcbc7d274dcfc5f4f06629c3dfb1da"
+SOURCE_FILENAME="jxrlib-$srcGitRev.tar.gz"
+SOURCE_DIR="jxrlib-$srcGitRev"
+PATCHES="jxrlib-$portVersion.patch
+	jxrlib-$portVersion-haiku.patch"
+
+ARCHITECTURES="all !x86_gcc2"
+SECONDARY_ARCHITECTURES="x86"
+
+commandBinDir=$binDir
+commandSuffix=$secondaryArchSuffix
+if [ "$targetArchitecture" = x86_gcc2 ]; then
+	commandBinDir=$prefix/bin
+	commandSuffix=
+fi
+
+PROVIDES="
+	jxrlib$secondaryArchSuffix = $portVersion
+	cmd:JxrDecApp$commandSuffix = $portVersion
+	cmd:JxrEncApp$commandSuffix = $portVersion
+	lib:libjpegxr$secondaryArchSuffix = $portVersion compat >= 0
+	lib:libjxrglue$secondaryArchSuffix = $portVersion compat >= 0
+	"
+REQUIRES="
+	haiku$secondaryArchSuffix
+	"
+
+PROVIDES_devel="
+	jxrlib${secondaryArchSuffix}_devel = $portVersion
+	devel:libjpegxr$secondaryArchSuffix = $portVersion compat >= 0
+	devel:libjxrglue$secondaryArchSuffix = $portVersion compat >= 0
+	"
+REQUIRES_devel="
+	jxrlib$secondaryArchSuffix == $portVersion base
+	"
+
+BUILD_REQUIRES="
+	haiku${secondaryArchSuffix}_devel
+	"
+BUILD_PREREQUIRES="
+	cmd:cmake
+	cmd:gcc$secondaryArchSuffix
+	cmd:make
+	"
+
+BUILD()
+{
+	cmake -Bbuild -S. -DCMAKE_BUILD_TYPE=Release \
+		-DCMAKE_INSTALL_PREFIX=$prefix \
+		-DJXRLIB_INSTALL_BIN_DIR=$commandBinDir \
+		-DJXRLIB_INSTALL_LIB_DIR=$libDir \
+		-DJXRLIB_INSTALL_INCLUDE_DIR=$includeDir/jxrlib
+	make -C build $jobArgs
+}
+
+INSTALL()
+{
+	make -C build install
+
+	# The template hard-codes <prefix>/lib and <prefix>/include.
+	sed -i -e "s|^libdir=.*|libdir=$libDir|" \
+		-e "s|^includedir=.*|includedir=$includeDir|" \
+		$libDir/pkgconfig/libjxr.pc
+
+	prepareInstalledDevelLibs libjpegxr libjxrglue
+	fixPkgconfig
+
+	packageEntries devel \
+		$developDir
+}
